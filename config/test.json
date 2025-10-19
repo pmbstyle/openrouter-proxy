@@ -1,0 +1,18 @@
+{
+  "server": {
+    "port": 3001
+  },
+  "logging": {
+    "level": "error"
+  },
+  "openrouter": {
+    "timeout": 5000,
+    "maxRetries": 1
+  },
+  "rateLimit": {
+    "maxRequests": 10000
+  },
+  "websocket": {
+    "maxConnections": 10
+  }
+}

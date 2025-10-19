@@ -1,0 +1,8 @@
+{
+  "openrouter": {
+    "timeout": 60000
+  },
+  "rateLimit": {
+    "maxRequests": 1000
+  }
+}
