@@ -4,7 +4,6 @@ A high-performance, stateless OpenRouter proxy service built with Node.js, TypeS
 
 ## Features
 
-- **Stateless Design**: No authentication or user tracking - direct access to OpenRouter API
 - **Dual Interface**: REST API for standard requests and WebSocket for streaming
 - **Comprehensive Parameter Support**: System prompts, model/provider selection, temperature, tools, etc.
 - **Multi-modal Support**: Text, audio, and image generation capabilities
