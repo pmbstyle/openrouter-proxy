@@ -9,14 +9,14 @@ import { v4 as uuidv4 } from 'uuid';
  * Generate a unique request ID
  */
 export const generateRequestId = (): string => {
-  return `req_${Date.now()}_${uuidv4().substr(0, 8)}`;
+  return `req_${Date.now()}_${uuidv4().slice(0, 8)}`;
 };
 
 /**
  * Generate a unique connection ID
  */
 export const generateConnectionId = (): string => {
-  return `conn_${Date.now()}_${uuidv4().substr(0, 8)}`;
+  return `conn_${Date.now()}_${uuidv4().slice(0, 8)}`;
 };
 
 /**
@@ -82,13 +82,13 @@ export const formatDuration = (ms: number): string => {
 /**
  * Sanitize string for logging (remove sensitive data)
  */
-export const sanitizeForLogging = (obj: any): any => {
+export const sanitizeForLogging = (obj: unknown): unknown => {
   if (typeof obj !== 'object' || obj === null) {
     return obj;
   }
 
   const sensitiveKeys = ['password', 'token', 'key', 'secret', 'authorization'];
-  const sanitized = { ...obj };
+  const sanitized = { ...obj as Record<string, unknown> };
 
   for (const key in sanitized) {
     if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
@@ -133,11 +133,11 @@ export const deepClone = <T>(obj: T): T => {
 /**
  * Check if a value is empty (null, undefined, empty string, empty array, empty object)
  */
-export const isEmpty = (value: any): boolean => {
+export const isEmpty = (value: unknown): boolean => {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return value.trim() === '';
   if (Array.isArray(value)) return value.length === 0;
-  if (typeof value === 'object') return Object.keys(value).length === 0;
+  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length === 0;
   return false;
 };
 

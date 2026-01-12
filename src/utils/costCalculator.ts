@@ -3,6 +3,8 @@
  * Centralized cost calculation logic
  */
 
+import { TOKEN_ESTIMATION_RATIO } from './constants';
+
 export interface TokenUsage {
   prompt_tokens: number;
   completion_tokens: number;
@@ -32,53 +34,53 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 
 export const calculateCost = (usage: TokenUsage, model: string): number => {
   const pricing = getModelPricing(model);
-  
+
   const promptCost = (usage.prompt_tokens / 1000) * pricing.promptCostPer1K;
   const completionCost = (usage.completion_tokens / 1000) * pricing.completionCostPer1K;
-  
+
   return promptCost + completionCost;
 };
 
 export const getModelPricing = (model: string): ModelPricing => {
   // Extract base model name (remove provider prefix)
   const baseModel = model.includes('/') ? model.split('/')[1] : model;
-  
+
   // Find exact match first
   if (MODEL_PRICING[baseModel]) {
     return MODEL_PRICING[baseModel];
   }
-  
+
   // Find partial match
   for (const [modelName, pricing] of Object.entries(MODEL_PRICING)) {
     if (baseModel.includes(modelName) || modelName.includes(baseModel)) {
       return pricing;
     }
   }
-  
+
   // Return default pricing
   return DEFAULT_PRICING;
 };
 
 export const estimateTokens = (text: string): number => {
-  // Simplified token estimation (in production, use proper tokenizer)
+  // Simplified token estimation (in production, use proper tokenizer like tiktoken)
   // This is a rough approximation: ~4 characters per token
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / TOKEN_ESTIMATION_RATIO);
 };
 
-export const estimatePromptTokens = (messages: Array<{ content: string | any[] }>): number => {
+export const estimatePromptTokens = (messages: Array<{ content: string | unknown[] }>): number => {
   let totalLength = 0;
-  
+
   for (const message of messages) {
     if (typeof message.content === 'string') {
       totalLength += message.content.length;
     } else if (Array.isArray(message.content)) {
       for (const part of message.content) {
-        if (part.type === 'text' && typeof part.text === 'string') {
+        if (typeof part === 'object' && part !== null && 'type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string') {
           totalLength += part.text.length;
         }
       }
     }
   }
-  
+
   return estimateTokens(totalLength.toString());
 };

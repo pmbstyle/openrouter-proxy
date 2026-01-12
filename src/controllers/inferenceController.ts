@@ -3,7 +3,7 @@
  * Handles inference requests and responses
  */
 
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { OpenRouterService } from '../services/openrouterService';
 import { ModelRegistryService } from '../services/modelRegistryService';
@@ -18,7 +18,7 @@ export class InferenceController {
     private modelRegistryService: ModelRegistryService
   ) {}
 
-  createCompletion = asyncHandler(async (req: any, res: Response): Promise<void> => {
+  createCompletion = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const requestId = uuidv4();
     const startTime = Date.now();
     const context: InferenceContext = {
@@ -58,7 +58,7 @@ export class InferenceController {
     }
   });
 
-  createStreamingCompletion = asyncHandler(async (req: any, res: Response): Promise<void> => {
+  createStreamingCompletion = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const requestId = uuidv4();
     const startTime = Date.now();
     const context: InferenceContext = {

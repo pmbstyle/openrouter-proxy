@@ -5,16 +5,13 @@
 
 import { Router } from 'express';
 import { InferenceController } from '../controllers/inferenceController';
-import { OpenRouterService } from '../services/openrouterService';
-import { ModelRegistryService } from '../services/modelRegistryService';
 import { defaultRateLimiter, inferenceRateLimiter } from '../middleware/rateLimiting';
 import { validateInferenceRequest, validateRequestSize } from '../middleware/validation';
+import { openrouterService, modelRegistryService } from '../app';
 
 const router = Router();
 
-// Initialize services
-const openrouterService = new OpenRouterService();
-const modelRegistryService = new ModelRegistryService(openrouterService);
+// Initialize controller with shared services
 const inferenceController = new InferenceController(
   openrouterService,
   modelRegistryService

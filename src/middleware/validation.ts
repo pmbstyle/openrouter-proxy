@@ -6,6 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { logger, createRequestLogger } from '../utils/logger';
+import { WebSocketMessage } from '../types/websocket';
 
 // Inference request validation schema
 const inferenceRequestSchema = Joi.object({
@@ -23,7 +24,11 @@ const inferenceRequestSchema = Joi.object({
             type: Joi.string().valid('text', 'image_url').required(),
             text: Joi.string().when('type', { is: 'text', then: Joi.required() }),
             image_url: Joi.object({
-              url: Joi.string().required(),
+              url: Joi.string().uri({
+                scheme: ['http', 'https', 'data'],
+              }).required().messages({
+                'string.uri': 'Image URL must be a valid HTTP, HTTPS, or data URL',
+              }),
               detail: Joi.string().valid('auto', 'low', 'high').optional(),
             }).when('type', { is: 'image_url', then: Joi.required() }),
           })
@@ -81,8 +86,8 @@ const modelRequestSchema = Joi.object({
   id: Joi.string().optional(),
   provider: Joi.string().optional(),
   search: Joi.string().optional(),
-  limit: Joi.number().integer().min(1).max(100).optional(),
-  offset: Joi.number().integer().min(0).optional(),
+  limit: Joi.number().integer().min(1).max(500).optional(),
+  offset: Joi.number().integer().min(0).max(10000).optional(),
 });
 
 
@@ -180,7 +185,7 @@ export const validateModelRequest = (req: Request, res: Response, next: NextFunc
 };
 
 
-export const validateWebSocketMessage = (message: any): { valid: boolean; error?: any; data?: any } => {
+export const validateWebSocketMessage = (message: unknown): { valid: boolean; error?: { code: number; message: string; details?: unknown }; data?: WebSocketMessage } => {
   const { error, value } = websocketMessageSchema.validate(message, {
     abortEarly: false,
     stripUnknown: true,

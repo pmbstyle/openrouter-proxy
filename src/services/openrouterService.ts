@@ -3,18 +3,46 @@
  * Core integration with OpenRouter API
  */
 
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import http from 'http';
+import https from 'https';
+import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { config } from '../utils/config';
 import { logger, createRequestLogger } from '../utils/logger';
 import { hasMessage } from '../utils/typeGuards';
+import { SENSITIVE_HEADERS } from '../utils/constants';
 import {
   OpenRouterRequest,
   OpenRouterResponse,
   Model,
   GenerationStats,
-  ErrorResponse,
 } from '../types/openrouter';
 import { InferenceRequest, InferenceResponse, StreamingInferenceResponse } from '../types/inference';
+
+// Configure http/https agents for connection pooling
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 60000,
+  maxSockets: 100,
+  maxFreeSockets: 50,
+  timeout: config.openrouter.timeout,
+});
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 60000,
+  maxSockets: 100,
+  maxFreeSockets: 50,
+  timeout: config.openrouter.timeout,
+});
+
+interface RequestMetadata {
+  requestId: string;
+  startTime: number;
+}
+
+interface ExtendedAxiosRequestConfig extends InternalAxiosRequestConfig {
+  metadata?: RequestMetadata;
+}
 
 export class OpenRouterService {
   private client: AxiosInstance;
@@ -23,10 +51,12 @@ export class OpenRouterService {
 
   constructor() {
     this.maxRetries = config.openrouter.maxRetries;
-    
+
     this.client = axios.create({
       baseURL: config.openrouter.baseUrl,
       timeout: config.openrouter.timeout,
+      httpAgent,
+      httpsAgent,
       headers: {
         'Authorization': `Bearer ${config.openrouter.apiKey}`,
         'Content-Type': 'application/json',
@@ -38,25 +68,39 @@ export class OpenRouterService {
     this.setupInterceptors();
   }
 
+  private redactSensitiveData(config: ExtendedAxiosRequestConfig): void {
+    // Redact sensitive headers
+    if (config.headers) {
+      for (const header of SENSITIVE_HEADERS) {
+        if (header in config.headers) {
+          (config.headers as Record<string, unknown>)[header] = '[REDACTED]';
+        }
+      }
+    }
+  }
+
   private setupInterceptors(): void {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
+      (requestConfig: ExtendedAxiosRequestConfig) => {
         this.requestCount++;
         const requestId = `req_${this.requestCount}_${Date.now()}`;
-        (config as any).metadata = { requestId, startTime: Date.now() };
-        
+        requestConfig.metadata = { requestId, startTime: Date.now() };
+
         const requestLogger = createRequestLogger({ requestId });
+
+        // Redact sensitive data before logging
+        this.redactSensitiveData(requestConfig);
+
         requestLogger.info('OpenRouter request initiated', {
-          url: config.url,
-          method: config.method,
-          data: config.data,
+          url: requestConfig.url,
+          method: requestConfig.method,
         });
-        
-        return config;
+
+        return requestConfig;
       },
       (error) => {
-        logger.error({ error: error.message }, 'OpenRouter request interceptor error');
+        logger.error({ error: error instanceof Error ? error.message : String(error) }, 'OpenRouter request interceptor error');
         return Promise.reject(error);
       }
     );
@@ -64,64 +108,63 @@ export class OpenRouterService {
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        const { requestId, startTime } = (response.config as any).metadata || {};
+        const metadata = (response.config as ExtendedAxiosRequestConfig).metadata;
+        const { requestId, startTime } = metadata || {};
         const duration = Date.now() - (startTime || 0);
-        
+
         const requestLogger = createRequestLogger({ requestId });
         requestLogger.info('OpenRouter request completed', {
           status: response.status,
           duration,
-          data: response.data,
         });
-        
+
         return response;
       },
       (error) => {
         const { requestId, startTime } = error.config?.metadata || {};
         const duration = Date.now() - (startTime || 0);
-        
+
         const requestLogger = createRequestLogger({ requestId });
         requestLogger.error('OpenRouter request failed', {
           status: error.response?.status,
           duration,
           error: error.message,
-          data: error.response?.data,
         });
-        
+
         return Promise.reject(this.handleError(error));
       }
     );
   }
 
-  private handleError(error: any): Error {
-    if (error.response) {
-      const { status, data } = error.response;
-      const errorResponse: ErrorResponse = {
-        code: status,
-        message: data?.error?.message || 'OpenRouter API error',
-        metadata: data?.error?.metadata,
-      };
-      
-      const customError = new Error(errorResponse.message);
-      (customError as any).code = errorResponse.code;
-      (customError as any).metadata = errorResponse.metadata;
-      (customError as any).type = 'openrouter';
-      
+  private handleError(error: unknown): Error {
+    if (!axios.isAxiosError(error)) {
+      const customError = new Error(error instanceof Error ? error.message : 'Unknown error');
+      (customError as unknown as { code: number }).code = 500;
+      (customError as unknown as { type: string }).type = 'internal';
       return customError;
     }
-    
-    if (error.request) {
+
+    if (error && typeof error === 'object' && 'response' in error) {
+      const err = error as { response: { status: number; data: { error?: { message?: string; metadata?: unknown } } } };
+      const { status, data } = err.response;
+      const message = data?.error?.message || 'OpenRouter API error';
+      const customError = new Error(message);
+      (customError as unknown as { code: number }).code = status;
+      (customError as unknown as { type: string }).type = 'openrouter';
+      (customError as unknown as { metadata?: unknown }).metadata = data?.error?.metadata;
+      return customError;
+    }
+
+    if (error && typeof error === 'object' && 'request' in error) {
       const customError = new Error('OpenRouter API request timeout');
-      (customError as any).code = 408;
-      (customError as any).type = 'timeout';
-      
+      (customError as unknown as { code: number }).code = 408;
+      (customError as unknown as { type: string }).type = 'timeout';
       return customError;
     }
-    
-    const customError = new Error(error.message || 'Unknown OpenRouter error');
-    (customError as any).code = 500;
-    (customError as any).type = 'internal';
-    
+
+    const customError = new Error(error instanceof Error ? error.message : 'Unknown error');
+    (customError as unknown as { code: number }).code = 500;
+    (customError as unknown as { type: string }).type = 'internal';
     return customError;
   }
 
@@ -245,14 +288,16 @@ export class OpenRouterService {
     };
   }
 
-  private transformStreamingResponse(stream: any): ReadableStream {
+  private transformStreamingResponse(stream: { on: (event: string, callback: (data?: unknown) => void) => void }): ReadableStream {
     const decoder = new TextDecoder();
     let buffer = '';
+    const self = this;
 
     return new ReadableStream({
       start(controller) {
-        stream.on('data', (chunk: Buffer) => {
-          buffer += decoder.decode(chunk, { stream: true });
+        stream.on('data', (chunk: unknown) => {
+          // Node.js streams emit Buffer objects
+          buffer += decoder.decode(chunk as Buffer, { stream: true });
           
           // Process complete lines
           const lines = buffer.split('\n');
@@ -269,7 +314,7 @@ export class OpenRouterService {
 
               try {
                 const parsed = JSON.parse(data);
-                const transformed = (this as any).transformStreamingChunk(parsed);
+                const transformed = self.transformStreamingChunk(parsed);
                 controller.enqueue(JSON.stringify(transformed) + '\n');
               } catch (error) {
                 // Ignore invalid JSON
@@ -282,22 +327,22 @@ export class OpenRouterService {
           controller.close();
         });
 
-        stream.on('error', (error: Error) => {
-          controller.error(error);
+        stream.on('error', (err) => {
+          controller.error(err instanceof Error ? err : new Error(String(err)));
         });
       },
     });
   }
 
-  private transformStreamingChunk(chunk: any): StreamingInferenceResponse {
+  private transformStreamingChunk(chunk: { id: string; model: string; created: number; choices: Array<{ index: number; delta: Record<string, unknown>; finish_reason: string | null }> }): StreamingInferenceResponse {
     return {
       id: chunk.id,
-      choices: chunk.choices.map((choice: any) => ({
+      choices: chunk.choices.map((choice) => ({
         finish_reason: choice.finish_reason,
         delta: {
-          content: choice.delta?.content || null,
-          role: choice.delta?.role,
-          tool_calls: choice.delta?.tool_calls,
+          content: typeof choice.delta?.content === 'string' ? choice.delta.content : null,
+          role: typeof choice.delta?.role === 'string' ? choice.delta.role : undefined,
+          tool_calls: Array.isArray(choice.delta?.tool_calls) ? choice.delta.tool_calls : undefined,
         },
       })),
       model: chunk.model,
