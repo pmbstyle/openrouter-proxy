@@ -73,6 +73,8 @@ The service uses environment variables for configuration. See `.env.example` for
 - `WS_HEARTBEAT_INTERVAL`: WebSocket heartbeat interval (default: 30000)
 - `MAX_CONCURRENT_REQUESTS`: Max concurrent requests (default: 100)
 - `REQUEST_TIMEOUT`: Request timeout in milliseconds (default: 30000)
+- `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins (e.g., `http://localhost:3001,https://example.com`). Defaults to `http://localhost:3000,http://localhost:3001` in development mode. Leave empty to block all cross-origin requests in production.
+- `CORS_CREDENTIALS`: Enable CORS credentials (default: true)
 
 ## API Endpoints
 
@@ -748,6 +750,36 @@ The service provides monitoring endpoints:
 - CORS protection
 - Security headers (Helmet)
 - No authentication required (stateless design)
+
+### CORS Configuration
+
+The service uses Cross-Origin Resource Sharing (CORS) to control which domains can access the API. By default:
+
+- **Development mode**: Allows `http://localhost:3000` and `http://localhost:3001`
+- **Production mode**: Blocks all cross-origin requests unless explicitly configured
+
+To configure allowed origins, set the `ALLOWED_ORIGINS` environment variable:
+
+```bash
+# Single origin
+ALLOWED_ORIGINS=http://localhost:3001
+
+# Multiple origins (comma-separated)
+ALLOWED_ORIGINS=http://localhost:3001,http://localhost:3000,https://yourdomain.com
+
+# Allow all origins (not recommended for production)
+ALLOWED_ORIGINS=*
+```
+
+**Common CORS issues:**
+
+If you see CORS errors in your browser console:
+
+1. Ensure your client's origin is in `ALLOWED_ORIGINS`
+2. Check that the origin includes the protocol (http/https) and port
+3. For local development, either:
+   - Set `NODE_ENV=development` to use default localhost origins
+   - Or explicitly set `ALLOWED_ORIGINS=http://localhost:YOUR_PORT`
 
 ## Performance
 

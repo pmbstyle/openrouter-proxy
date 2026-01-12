@@ -15,6 +15,10 @@ export type Config = {
     host: string;
     nodeEnv: string;
   };
+  cors: {
+    allowedOrigins: string[];
+    credentials: boolean;
+  };
   openrouter: {
     apiKey: string;
     baseUrl: string;
@@ -55,6 +59,14 @@ const loadConfig = (): Config => {
       port: parseInt(process.env.PORT || '3000', 10),
       host: process.env.HOST || '0.0.0.0',
       nodeEnv,
+    },
+    cors: {
+      allowedOrigins: process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+        : nodeEnv === 'development'
+          ? ['http://localhost:3000', 'http://localhost:3001']
+          : [],
+      credentials: process.env.CORS_CREDENTIALS === 'true' || true,
     },
     openrouter: {
       apiKey: process.env.OPENROUTER_API_KEY || '',

@@ -42,10 +42,12 @@ app.use(helmet({
 
 // CORS configuration
 const corsOptions = {
-  origin: config.server.nodeEnv === 'development' 
-    ? ['http://localhost:3000', 'http://localhost:3001']
-    : false,
-  credentials: true,
+  origin: config.cors.allowedOrigins.length > 0
+    ? config.cors.allowedOrigins
+    : config.server.nodeEnv === 'development'
+      ? ['http://localhost:3000', 'http://localhost:3001']
+      : false,
+  credentials: config.cors.credentials,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
