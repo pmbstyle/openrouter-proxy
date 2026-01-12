@@ -129,10 +129,12 @@ app.get('/health', async (_req, res) => {
 // Import routes AFTER services are initialized
 import inferenceRoutes from './routes/inference';
 import modelRoutes from './routes/models';
+import usageRoutes from './routes/usage';
 
 // API routes
 app.use('/api/v1/inference', inferenceRoutes);
 app.use('/api/v1/models', modelRoutes);
+app.use('/api/v1/usage', usageRoutes);
 
 // 404 handler
 app.use(notFoundHandler);

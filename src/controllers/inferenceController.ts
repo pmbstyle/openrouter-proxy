@@ -7,6 +7,7 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { OpenRouterService } from '../services/openrouterService';
 import { ModelRegistryService } from '../services/modelRegistryService';
+import { usageTrackingService } from '../services/usageTrackingService';
 import { createRequestLogger, logRequest, logResponse } from '../utils/logger';
 import { InferenceRequest, InferenceContext } from '../types/inference';
 import { calculateCost, estimatePromptTokens } from '../utils/costCalculator';
@@ -32,10 +33,29 @@ export class InferenceController {
     const requestLogger = createRequestLogger(context);
     logRequest(context, 'Inference request received');
 
+    // Get API key for tracking (if authenticated)
+    const apiKey = (req as any).apiKey;
+
     try {
       // Validate model
       const modelExists = await this.modelRegistryService.validateModel(req.body.model);
       if (!modelExists) {
+        // Track failed request
+        const duration = Date.now() - startTime;
+        usageTrackingService.recordUsage({
+          requestId,
+          apiKey,
+          model: req.body.model,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          cost: 0,
+          stream: false,
+          success: false,
+          errorType: 'validation',
+          duration,
+        });
+
         res.status(400).json({
           error: {
             code: 400,
@@ -48,12 +68,48 @@ export class InferenceController {
 
       // Create completion
       const response = await this.openrouterService.createCompletion(req.body as InferenceRequest);
-      
+      const duration = Date.now() - startTime;
+
+      // Track successful usage
+      if (response.usage) {
+        const cost = calculateCost(response.usage, req.body.model);
+        usageTrackingService.recordUsage({
+          requestId,
+          apiKey,
+          model: req.body.model,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+          cost,
+          stream: false,
+          success: true,
+          duration,
+        });
+      }
+
       logResponse(context, 'Inference request completed');
 
       res.json(response);
-    } catch (error: any) {
-      requestLogger.error('Inference request failed', { error: error.message });
+    } catch (error: unknown) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Track failed request
+      usageTrackingService.recordUsage({
+        requestId,
+        apiKey,
+        model: req.body.model,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        stream: false,
+        success: false,
+        errorType: 'api_error',
+        duration,
+      });
+
+      requestLogger.error('Inference request failed', { error: errorMessage });
       throw error;
     }
   });
@@ -72,10 +128,29 @@ export class InferenceController {
     const requestLogger = createRequestLogger(context);
     logRequest(context, 'Streaming inference request received');
 
+    // Get API key for tracking (if authenticated)
+    const apiKey = (req as any).apiKey;
+
     try {
       // Validate model
       const modelExists = await this.modelRegistryService.validateModel(req.body.model);
       if (!modelExists) {
+        // Track failed request
+        const duration = Date.now() - startTime;
+        usageTrackingService.recordUsage({
+          requestId,
+          apiKey,
+          model: req.body.model,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          cost: 0,
+          stream: true,
+          success: false,
+          errorType: 'validation',
+          duration,
+        });
+
         res.status(400).json({
           error: {
             code: 400,
@@ -95,7 +170,7 @@ export class InferenceController {
 
       // Create streaming completion
       const stream = await this.openrouterService.createStreamingCompletion(req.body as InferenceRequest);
-      
+
       let totalTokens = 0;
       let promptTokens = 0;
       let completionTokens = 0;
@@ -114,10 +189,10 @@ export class InferenceController {
 
           for (const line of lines) {
             if (line.trim() === '') continue;
-            
+
             try {
               const data = JSON.parse(line);
-              
+
               // Track content for token estimation
               if (data.choices?.[0]?.delta?.content) {
                 content += data.choices[0].delta.content;
@@ -135,6 +210,25 @@ export class InferenceController {
         promptTokens = estimatePromptTokens(req.body.messages);
         completionTokens = Math.ceil(content.length / 4); // Still simplified for completion
         totalTokens = promptTokens + completionTokens;
+
+        // Track successful usage
+        const duration = Date.now() - startTime;
+        const cost = calculateCost(
+          { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+          req.body.model
+        );
+        usageTrackingService.recordUsage({
+          requestId,
+          apiKey,
+          model: req.body.model,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          cost,
+          stream: true,
+          success: true,
+          duration,
+        });
 
         // Send final usage data
         const usageData = {
@@ -162,8 +256,26 @@ export class InferenceController {
         reader.cancel();
         res.end();
       }
-    } catch (error: any) {
-      requestLogger.error('Streaming inference request failed', { error: error.message });
+    } catch (error: unknown) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Track failed request
+      usageTrackingService.recordUsage({
+        requestId,
+        apiKey,
+        model: req.body.model,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        stream: true,
+        success: false,
+        errorType: 'api_error',
+        duration,
+      });
+
+      requestLogger.error('Streaming inference request failed', { error: errorMessage });
       throw error;
     }
   });
