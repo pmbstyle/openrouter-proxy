@@ -1,4 +1,4 @@
-# LLM Proxy Service
+# OpenRouter Proxy Service
 
 A high-performance, stateless OpenRouter proxy service built with Node.js, TypeScript, and Express. Provides REST API and WebSocket streaming capabilities for LLM inference.
 
