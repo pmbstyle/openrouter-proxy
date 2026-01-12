@@ -4,18 +4,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { ModelRegistryService } from '../services/modelRegistryService';
-import { OpenRouterService } from '../services/openrouterService';
 import { defaultRateLimiter } from '../middleware/rateLimiting';
 import { validateModelRequest } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
 import { logger, createRequestLogger } from '../utils/logger';
+import { openrouterService, modelRegistryService } from '../app';
 
 const router = Router();
-
-// Initialize services
-const openrouterService = new OpenRouterService();
-const modelRegistryService = new ModelRegistryService(openrouterService);
 
 /**
  * @route GET /api/v1/models

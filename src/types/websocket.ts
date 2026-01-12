@@ -76,7 +76,7 @@ export type WebSocketConnection = {
   connectedAt: number;
   lastActivity: number;
   isActive: boolean;
-  currentRequestId?: string;
+  activeRequests: Map<string, { startedAt: number }>;
   ip: string;
   userAgent?: string;
 };

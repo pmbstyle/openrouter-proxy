@@ -6,21 +6,27 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { createServer } from 'http';
+import { createServer, Server as HttpServer } from 'http';
 import { WebSocketServer } from 'ws';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from './utils/config';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { defaultRateLimiter } from './middleware/rateLimiting';
+import { HTTP_STATUS, CACHE, DEFAULT_STREAM_TIMEOUT } from './utils/constants';
 
-// Import routes
-import inferenceRoutes from './routes/inference';
-import modelRoutes from './routes/models';
-
-// Import controllers
-import { WebSocketController } from './controllers/websocketController';
+// Import services and controllers
 import { OpenRouterService } from './services/openrouterService';
 import { ModelRegistryService } from './services/modelRegistryService';
+import { WebSocketController } from './controllers/websocketController';
+
+// Track active connections for graceful shutdown
+const activeConnections = new Set<unknown>();
+let isShuttingDown = false;
+
+// Initialize services (singleton instances) - MUST be before route imports
+const openrouterService = new OpenRouterService();
+const modelRegistryService = new ModelRegistryService(openrouterService);
 
 const app = express();
 
@@ -61,7 +67,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request ID middleware
 app.use((req, res, next) => {
-  req.headers['x-request-id'] = req.headers['x-request-id'] || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  req.headers['x-request-id'] = req.headers['x-request-id'] || `req_${uuidv4()}`;
   res.setHeader('X-Request-ID', req.headers['x-request-id']);
   next();
 });
@@ -69,7 +75,7 @@ app.use((req, res, next) => {
 // Logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
-  
+
   res.on('finish', () => {
     const duration = Date.now() - start;
     logger.info({
@@ -82,7 +88,7 @@ app.use((req, res, next) => {
       requestId: req.headers['x-request-id'],
     }, 'HTTP request completed');
   });
-  
+
   next();
 });
 
@@ -90,15 +96,39 @@ app.use((req, res, next) => {
 app.use(defaultRateLimiter);
 
 // Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
+app.get('/health', async (_req, res) => {
+  const health = {
+    status: 'healthy' as 'healthy' | 'unhealthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     version: process.env['npm_package_version'] || '1.0.0',
     environment: config.server.nodeEnv,
-  });
+    openrouter: 'unknown' as 'reachable' | 'unreachable' | 'unknown',
+  };
+
+  // Check OpenRouter connectivity
+  try {
+    const response = await fetch(`${config.openrouter.baseUrl}/models`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${config.openrouter.apiKey}`,
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    health.openrouter = response.ok ? 'reachable' : 'unreachable';
+  } catch {
+    health.openrouter = 'unreachable';
+  }
+
+  const statusCode = health.openrouter === 'reachable' ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
+  health.status = health.openrouter === 'reachable' ? 'healthy' : 'unhealthy';
+
+  res.status(statusCode).json(health);
 });
+
+// Import routes AFTER services are initialized
+import inferenceRoutes from './routes/inference';
+import modelRoutes from './routes/models';
 
 // API routes
 app.use('/api/v1/inference', inferenceRoutes);
@@ -114,15 +144,11 @@ app.use(errorHandler);
 const server = createServer(app);
 
 // Create WebSocket server
-const wss = new WebSocketServer({ 
+const wss = new WebSocketServer({
   server,
   path: '/ws',
-  maxPayload: 1024 * 1024, // 1MB
+  maxPayload: config.websocket.maxConnections * 1024, // Configurable max payload in bytes
 });
-
-// Initialize services
-const openrouterService = new OpenRouterService();
-const modelRegistryService = new ModelRegistryService(openrouterService);
 
 // Initialize WebSocket controller
 const websocketController = new WebSocketController(
@@ -132,23 +158,41 @@ const websocketController = new WebSocketController(
 );
 
 // Graceful shutdown
-const gracefulShutdown = (signal: string) => {
-  logger.info({ signal }, 'Received shutdown signal');
-  
+const gracefulShutdown = async (signal: string): Promise<void> => {
+  if (isShuttingDown) {
+    logger.warn('Shutdown already in progress');
+    return;
+  }
+
+  isShuttingDown = true;
+  logger.info({ signal, activeConnections: activeConnections.size }, 'Received shutdown signal');
+
+  // Stop accepting new connections
   server.close(() => {
-    logger.info('HTTP server closed');
-    
-    websocketController.destroy();
-    logger.info('WebSocket server closed');
-    
-    process.exit(0);
+    logger.info('HTTP server closed, no longer accepting new connections');
   });
-  
-  // Force close after 30 seconds
-  setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, 30000);
+
+  // Wait for active connections to finish (up to 30 seconds)
+  const shutdownTimeout = 30000;
+  const checkInterval = 1000;
+  let elapsed = 0;
+
+  while (activeConnections.size > 0 && elapsed < shutdownTimeout) {
+    logger.info({ activeConnections: activeConnections.size }, 'Waiting for active connections to finish...');
+    await new Promise(resolve => setTimeout(resolve, checkInterval));
+    elapsed += checkInterval;
+  }
+
+  if (activeConnections.size > 0) {
+    logger.warn({ activeConnections: activeConnections.size }, 'Forcing shutdown with active connections remaining');
+  }
+
+  // Close WebSocket connections
+  websocketController.destroy();
+  logger.info('WebSocket server closed');
+
+  logger.info('Graceful shutdown complete');
+  process.exit(0);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
@@ -166,4 +210,5 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-export { app, server, websocketController };
+// Export for use in routes
+export { app, server, websocketController, openrouterService, modelRegistryService };

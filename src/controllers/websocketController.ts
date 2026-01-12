@@ -8,8 +8,10 @@ import { IncomingMessage } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import { OpenRouterService } from '../services/openrouterService';
 import { ModelRegistryService } from '../services/modelRegistryService';
+import { config } from '../utils/config';
 import { logger, createRequestLogger, logWebSocket } from '../utils/logger';
 import { estimatePromptTokens } from '../utils/costCalculator';
+import { DEFAULT_STREAM_TIMEOUT, HTTP_STATUS } from '../utils/constants';
 import {
   WebSocketMessage,
   WebSocketInferenceRequest,
@@ -71,11 +73,19 @@ export class WebSocketController {
       return;
     }
 
+    // Enforce max connections limit
+    if (this.stats.activeConnections >= config.websocket.maxConnections) {
+      ws.close(1008, 'Server at maximum connection capacity');
+      logWebSocket({ connectionId, ip }, 'WebSocket connection rejected: max connections reached');
+      return;
+    }
+
     const connection: WebSocketConnection = {
       id: connectionId,
       connectedAt: Date.now(),
       lastActivity: Date.now(),
       isActive: true,
+      activeRequests: new Map(),
       ip,
       userAgent,
     };
@@ -177,20 +187,36 @@ export class WebSocketController {
     const startTime = Date.now();
     const connectionLogger = createRequestLogger({ connectionId, requestId });
 
+    // Check if request already exists
+    if (connection.activeRequests.has(requestId)) {
+      this.sendError(ws, connectionId, {
+        code: HTTP_STATUS.BAD_REQUEST,
+        message: `Request '${requestId}' is already active`,
+        type: 'validation',
+      });
+      return;
+    }
+
+    // Track active request
+    connection.activeRequests.set(requestId, { startedAt: startTime });
+
     try {
       // Validate model
       const modelExists = await this.modelRegistryService.validateModel(message.data.model);
       if (!modelExists) {
         this.sendError(ws, connectionId, {
-          code: 400,
+          code: HTTP_STATUS.BAD_REQUEST,
           message: `Model '${message.data.model}' not found or not supported`,
           type: 'validation',
         });
         return;
       }
 
-      connection.currentRequestId = requestId;
       logWebSocket({ connectionId, requestId }, 'WebSocket inference request started');
+
+      // Create abort controller for timeout
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), DEFAULT_STREAM_TIMEOUT);
 
       // Create streaming completion
       const stream = await this.openrouterService.createStreamingCompletion(message.data);
@@ -212,10 +238,10 @@ export class WebSocketController {
 
           for (const line of lines) {
             if (line.trim() === '') continue;
-            
+
             try {
               const data = JSON.parse(line);
-              
+
               // Track content for token estimation
               if (data.choices?.[0]?.delta?.content) {
                 content += data.choices[0].delta.content;
@@ -236,7 +262,8 @@ export class WebSocketController {
 
               this.sendMessage(ws, response);
             } catch (parseError) {
-              // Ignore invalid JSON
+              // Log but don't fail on individual chunk parse errors
+              connectionLogger.warn('Failed to parse streaming chunk', { error: parseError });
             }
           }
         }
@@ -246,25 +273,27 @@ export class WebSocketController {
         completionTokens = Math.ceil(content.length / 4); // Still simplified for completion
         totalTokens = promptTokens + completionTokens;
 
-
-        logWebSocket({ connectionId, requestId }, 'WebSocket inference request completed');
+        logWebSocket({ connectionId, requestId, totalTokens }, 'WebSocket inference request completed');
 
       } finally {
+        clearTimeout(timeout);
+        abortController.abort();
         reader.cancel();
-        connection.currentRequestId = undefined;
+        connection.activeRequests.delete(requestId);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.totalErrors++;
-      connection.currentRequestId = undefined;
+      connection.activeRequests.delete(requestId);
 
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       this.sendError(ws, connectionId, {
-        code: 500,
-        message: error.message || 'Internal server error',
+        code: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+        message: errorMessage,
         type: 'internal',
       });
 
-      connectionLogger.error('WebSocket inference request failed', { error: error.message });
+      connectionLogger.error('WebSocket inference request failed', { error: errorMessage });
     }
   }
 
@@ -289,10 +318,13 @@ export class WebSocketController {
     this.stats.activeConnections--;
 
     const duration = Date.now() - connection.connectedAt;
-    this.stats.averageConnectionDuration = 
+    this.stats.averageConnectionDuration =
       (this.stats.averageConnectionDuration * (this.stats.totalConnections - 1) + duration) / this.stats.totalConnections;
 
-    logWebSocket({ connectionId, duration, code, reason }, 'WebSocket connection closed');
+    const activeRequestCount = connection.activeRequests.size;
+    connection.activeRequests.clear();
+
+    logWebSocket({ connectionId, duration, code, reason, activeRequests: activeRequestCount }, 'WebSocket connection closed');
 
     // Clean up after a delay
     setTimeout(() => {
@@ -361,7 +393,9 @@ export class WebSocketController {
     const connection = this.connections.get(connectionId);
     if (!connection) return false;
 
-    const ws = Array.from(this.wss.clients).find((client: any) => client.connectionId === connectionId);
+    const ws = Array.from(this.wss.clients).find((client) =>
+      'connectionId' in client && client.connectionId === connectionId
+    ) as WebSocket & { connectionId?: string } | undefined;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close(1000, 'Server requested close');
     }

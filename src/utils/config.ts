@@ -19,6 +19,10 @@ export type Config = {
     allowedOrigins: string[];
     credentials: boolean;
   };
+  authentication: {
+    apiKeys: string[];
+    enabled: boolean;
+  };
   openrouter: {
     apiKey: string;
     baseUrl: string;
@@ -68,6 +72,12 @@ const loadConfig = (): Config => {
           : [],
       credentials: process.env.CORS_CREDENTIALS === 'true' || true,
     },
+    authentication: {
+      apiKeys: process.env.API_KEYS
+        ? process.env.API_KEYS.split(',').map(key => key.trim()).filter(key => key.length > 0)
+        : [],
+      enabled: process.env.AUTH_ENABLED === 'true' || false,
+    },
     openrouter: {
       apiKey: process.env.OPENROUTER_API_KEY || '',
       baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
@@ -92,11 +102,11 @@ const loadConfig = (): Config => {
   };
 
   // Deep merge environment config with defaults
-  const deepMerge = (target: any, source: any): any => {
+  const deepMerge = (target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> => {
     const result = { ...target };
     for (const key in source) {
       if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-        result[key] = deepMerge(target[key] || {}, source[key]);
+        result[key] = deepMerge((target[key] || {}) as Record<string, unknown>, source[key] as Record<string, unknown>);
       } else {
         result[key] = source[key];
       }
@@ -104,7 +114,7 @@ const loadConfig = (): Config => {
     return result;
   };
 
-  return deepMerge(defaultConfig, envConfig);
+  return deepMerge(defaultConfig, envConfig) as Config;
 };
 
 export const config = loadConfig();
