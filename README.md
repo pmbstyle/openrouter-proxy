@@ -24,7 +24,7 @@ A high-performance, stateless OpenRouter proxy service built with Node.js, TypeS
 1. Clone the repository:
 ```bash
 git clone https://github.com/pmbstyle/openrouter-proxy.git
-cd llm-proxy
+cd openrouter-proxy
 ```
 
 2. Install dependencies:
