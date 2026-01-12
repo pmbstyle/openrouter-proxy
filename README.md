@@ -1,6 +1,6 @@
 # LLM Proxy Service
 
-A high-performance, stateless OpenRouter proxy service built with Node.js, TypeScript, and Express. Provides REST API and WebSocket streaming capabilities for LLM inference without authentication or user tracking.
+A high-performance, stateless OpenRouter proxy service built with Node.js, TypeScript, and Express. Provides REST API and WebSocket streaming capabilities for LLM inference.
 
 ## Features
 
@@ -23,7 +23,7 @@ A high-performance, stateless OpenRouter proxy service built with Node.js, TypeS
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/pmbstyle/openrouter-proxy.git
 cd llm-proxy
 ```
 
