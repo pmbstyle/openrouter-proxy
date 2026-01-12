@@ -10,6 +10,7 @@ A high-performance, stateless OpenRouter proxy service built with Node.js, TypeS
 - **Robust Error Handling**: Graceful failure recovery and informative error responses
 - **High Performance**: Optimized for speed and low latency
 - **IP-based Rate Limiting**: Protection against abuse while maintaining simplicity
+- **Usage tracking**: Global and per API key tracking requests, tokens, cost, and models
 
 ## Quick Start
 
