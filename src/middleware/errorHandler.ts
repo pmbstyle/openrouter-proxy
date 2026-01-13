@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { logger, logError } from '../utils/logger';
+import { logger, logError, sanitizeStackTrace } from '../utils/logger';
 import { InferenceError } from '../types/inference';
 
 export interface ErrorWithCode extends Error {
@@ -185,7 +185,10 @@ export const errorHandler = (
       code: statusCode,
       message: error.message || 'Internal server error',
       type: 'internal',
-      ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+      // Only show sanitized stack traces in development, never in production
+      ...(process.env.NODE_ENV === 'development' && {
+        stack: sanitizeStackTrace(error.stack)
+      }),
     },
   });
 };

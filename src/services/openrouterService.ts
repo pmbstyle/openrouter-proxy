@@ -317,7 +317,8 @@ export class OpenRouterService {
                 const transformed = self.transformStreamingChunk(parsed);
                 controller.enqueue(JSON.stringify(transformed) + '\n');
               } catch (error) {
-                // Ignore invalid JSON
+                // Log invalid JSON at debug level
+                logger.debug({ data, error: error instanceof Error ? error.message : String(error) }, 'Failed to parse streaming chunk');
               }
             }
           }

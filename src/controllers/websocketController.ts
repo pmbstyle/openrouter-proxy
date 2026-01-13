@@ -26,6 +26,8 @@ import { websocketRateLimiter } from '../middleware/rateLimiting';
 
 export class WebSocketController {
   private connections: Map<string, WebSocketConnection> = new Map();
+  private ipConnectionCounts: Map<string, number> = new Map();
+  private readonly MAX_CONNECTIONS_PER_IP = 10;
   private wss: WebSocketServer;
   private openrouterService: OpenRouterService;
   private modelRegistryService: ModelRegistryService;
@@ -73,8 +75,21 @@ export class WebSocketController {
       return;
     }
 
+    // Check per-IP connection limit
+    const ipCount = this.ipConnectionCounts.get(ip) || 0;
+    if (ipCount >= this.MAX_CONNECTIONS_PER_IP) {
+      ws.close(1008, `Too many connections from this IP (max: ${this.MAX_CONNECTIONS_PER_IP})`);
+      logWebSocket({ connectionId, ip, ipCount }, 'WebSocket connection rejected: IP limit exceeded');
+      return;
+    }
+
+    // Increment IP connection count
+    this.ipConnectionCounts.set(ip, ipCount + 1);
+
     // Enforce max connections limit
     if (this.stats.activeConnections >= config.websocket.maxConnections) {
+      // Decrement IP count since connection is rejected
+      this.ipConnectionCounts.set(ip, this.ipConnectionCounts.get(ip)! - 1);
       ws.close(1008, 'Server at maximum connection capacity');
       logWebSocket({ connectionId, ip }, 'WebSocket connection rejected: max connections reached');
       return;
@@ -316,6 +331,12 @@ export class WebSocketController {
 
     connection.isActive = false;
     this.stats.activeConnections--;
+
+    // Decrement IP connection count
+    const ipCount = this.ipConnectionCounts.get(connection.ip) || 0;
+    if (ipCount > 0) {
+      this.ipConnectionCounts.set(connection.ip, ipCount - 1);
+    }
 
     const duration = Date.now() - connection.connectedAt;
     this.stats.averageConnectionDuration =

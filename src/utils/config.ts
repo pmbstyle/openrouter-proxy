@@ -70,7 +70,7 @@ const loadConfig = (): Config => {
         : nodeEnv === 'development'
           ? ['http://localhost:3000', 'http://localhost:3001']
           : [],
-      credentials: process.env.CORS_CREDENTIALS === 'true' || true,
+      credentials: process.env.CORS_CREDENTIALS === 'true',
     },
     authentication: {
       apiKeys: process.env.API_KEYS
@@ -146,6 +146,21 @@ export const validateConfig = (): void => {
   if (config.server.nodeEnv === 'production') {
     if (config.openrouter.baseUrl !== 'https://openrouter.ai/api/v1') {
       errors.push('OPENROUTER_BASE_URL should use production URL in production');
+    }
+
+    // CRITICAL: Authentication must be enabled in production
+    if (!config.authentication.enabled) {
+      errors.push('AUTH_ENABLED must be true in production');
+    }
+
+    // CRITICAL: API keys must be configured in production
+    if (config.authentication.apiKeys.length === 0) {
+      errors.push('API_KEYS must be set in production');
+    }
+
+    // CRITICAL: CORS origins must be explicitly configured in production
+    if (config.cors.allowedOrigins.length === 0) {
+      errors.push('ALLOWED_ORIGINS must be configured in production');
     }
   }
 

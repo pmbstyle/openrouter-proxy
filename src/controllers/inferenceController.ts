@@ -201,7 +201,8 @@ export class InferenceController {
               // Send chunk to client
               res.write(`data: ${line}\n\n`);
             } catch (parseError) {
-              // Ignore invalid JSON
+              // Log invalid JSON at debug level for troubleshooting
+              requestLogger.debug({ line, error: parseError instanceof Error ? parseError.message : String(parseError) }, 'Failed to parse streaming chunk');
             }
           }
         }

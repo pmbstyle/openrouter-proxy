@@ -72,6 +72,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// Metrics middleware
+import { metricsMiddleware } from './middleware/metrics';
+app.use(metricsMiddleware);
+
 // Logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
@@ -103,7 +107,14 @@ app.get('/health', async (_req, res) => {
     uptime: process.uptime(),
     version: process.env['npm_package_version'] || '1.0.0',
     environment: config.server.nodeEnv,
-    openrouter: 'unknown' as 'reachable' | 'unreachable' | 'unknown',
+    checks: {
+      openrouter: 'unknown' as 'reachable' | 'unreachable' | 'unknown',
+      redis: 'unknown' as 'reachable' | 'unreachable' | 'unknown',
+    },
+    metrics: {
+      memory: process.memoryUsage(),
+      cpu: process.cpuUsage(),
+    },
   };
 
   // Check OpenRouter connectivity
@@ -115,14 +126,26 @@ app.get('/health', async (_req, res) => {
       },
       signal: AbortSignal.timeout(5000),
     });
-    health.openrouter = response.ok ? 'reachable' : 'unreachable';
+    health.checks.openrouter = response.ok ? 'reachable' : 'unreachable';
   } catch {
-    health.openrouter = 'unreachable';
+    health.checks.openrouter = 'unreachable';
   }
 
-  const statusCode = health.openrouter === 'reachable' ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-  health.status = health.openrouter === 'reachable' ? 'healthy' : 'unhealthy';
+  // Check Redis connectivity
+  try {
+    // Import redis client if available
+    const { getRateLimitStats } = await import('./middleware/rateLimiting');
+    const stats = getRateLimitStats();
+    health.checks.redis = stats.redisConnected ? 'reachable' : 'unreachable';
+  } catch {
+    health.checks.redis = 'unreachable';
+  }
 
+  // Determine overall health
+  const hasUnreachable = Object.values(health.checks).some(c => c === 'unreachable');
+  health.status = hasUnreachable ? 'unhealthy' : 'healthy';
+
+  const statusCode = health.status === 'healthy' ? 200 : 503;
   res.status(statusCode).json(health);
 });
 
@@ -192,6 +215,14 @@ const gracefulShutdown = async (signal: string): Promise<void> => {
   // Close WebSocket connections
   websocketController.destroy();
   logger.info('WebSocket server closed');
+
+  // Close Redis connection if available
+  try {
+    const { closeRateLimiting } = await import('./middleware/rateLimiting');
+    await closeRateLimiting();
+  } catch (error) {
+    logger.error({ error }, 'Error closing Redis connection');
+  }
 
   logger.info('Graceful shutdown complete');
   process.exit(0);

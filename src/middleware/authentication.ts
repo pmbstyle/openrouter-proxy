@@ -6,7 +6,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { HTTP_STATUS } from '../utils/constants';
 import { AuthorizationError } from './errorHandler';
 
 /**
@@ -14,10 +13,26 @@ import { AuthorizationError } from './errorHandler';
  * Validates API keys from the X-API-Key header
  */
 export const authenticateApiKey = (req: Request, res: Response, next: NextFunction): void => {
-  // Skip authentication if disabled or no API keys are configured (public mode)
-  if (!config.authentication.enabled || config.authentication.apiKeys.length === 0) {
-    next();
-    return;
+  // CRITICAL: In production, authentication must ALWAYS be enabled
+  if (config.server.nodeEnv === 'production' && !config.authentication.enabled) {
+    logger.error('Authentication must be enabled in production');
+    throw new AuthorizationError('Authentication required in production');
+  }
+
+  // In development/test, warn but allow for testing purposes
+  if (!config.authentication.enabled) {
+    if (config.server.nodeEnv !== 'production') {
+      logger.warn('Authentication disabled - development mode only');
+      next();
+      return;
+    }
+    throw new AuthorizationError('Authentication required');
+  }
+
+  // Ensure API keys are configured
+  if (config.authentication.apiKeys.length === 0) {
+    logger.error('No API keys configured');
+    throw new AuthorizationError('Server configuration error: no API keys configured');
   }
 
   const apiKey = req.headers['x-api-key'] as string;

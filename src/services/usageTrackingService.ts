@@ -6,6 +6,12 @@
 
 import { logger } from '../utils/logger';
 import { UsageRecord, UsageStats, ModelStats, TimeSeriesPoint, UsageFilters, UsageSummary } from '../types/usage';
+import {
+  inferenceCounter,
+  inferenceDuration,
+  inferenceTokens,
+  inferenceCost,
+} from '../telemetry/metrics';
 
 const MAX_RECORDS = 10000; // Max records to keep in memory
 const MAX_TIME_SERIES_POINTS = 100; // Max time series points to keep
@@ -34,6 +40,35 @@ class UsageTrackingService {
 
     // Update time series data
     this.updateTimeSeries(record);
+
+    // Record OpenTelemetry metrics
+    inferenceCounter.add(1, {
+      model: record.model,
+      success: record.success.toString(),
+    });
+
+    inferenceDuration.record(record.duration, {
+      model: record.model,
+    });
+
+    inferenceTokens.record(record.totalTokens, {
+      model: record.model,
+      token_type: 'total',
+    });
+
+    inferenceTokens.record(record.promptTokens, {
+      model: record.model,
+      token_type: 'prompt',
+    });
+
+    inferenceTokens.record(record.completionTokens, {
+      model: record.model,
+      token_type: 'completion',
+    });
+
+    inferenceCost.add(record.cost, {
+      model: record.model,
+    });
 
     // Cleanup if needed
     if (this.records.length > MAX_RECORDS) {

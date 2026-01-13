@@ -1,0 +1,41 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      name: "Warm up"
+    - duration: 120
+      arrivalRate: 50
+      name: "Sustained load"
+    - duration: 60
+      arrivalRate: 100
+      name: "Spike test"
+  defaults:
+    headers:
+      X-API-Key: 'test-load-key'
+  processor: './load-test-processor.js'
+
+scenarios:
+  - name: "Inference Flow"
+    flow:
+      - post:
+          url: "/api/v1/inference"
+          json:
+            model: "openai/gpt-3.5-turbo"
+            messages:
+              - role: "user"
+                content: "Generate a short response"
+          capture:
+            - json: "$.id"
+              as: "requestId"
+      - think: 1  # Pause for 1 second
+
+  - name: "Model List"
+    flow:
+      - get:
+          url: "/api/v1/models"
+
+  - name: "Health Check"
+    flow:
+      - get:
+          url: "/health"
