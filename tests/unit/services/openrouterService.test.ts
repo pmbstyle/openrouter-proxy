@@ -4,16 +4,33 @@
 
 import { OpenRouterService } from '../../../src/services/openrouterService';
 import { config } from '../../../src/utils/config';
+import { InferenceRequest } from '../../../src/types/inference';
 
 // Mock axios
 jest.mock('axios');
 const mockedAxios = require('axios');
+
+// Create mock axios client with interceptors
+const createMockAxiosClient = (methodMocks: any = {}) => ({
+  get: methodMocks.get || jest.fn(),
+  post: methodMocks.post || jest.fn(),
+  put: jest.fn(),
+  delete: jest.fn(),
+  patch: jest.fn(),
+  request: jest.fn(),
+  interceptors: {
+    request: { use: jest.fn() },
+    response: { use: jest.fn() }
+  }
+} as any);
 
 describe('OpenRouterService', () => {
   let service: OpenRouterService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Mock axios.create to return a proper client with interceptors
+    mockedAxios.create.mockReturnValue(createMockAxiosClient());
     service = new OpenRouterService();
   });
 
@@ -46,15 +63,12 @@ describe('OpenRouterService', () => {
         }
       };
 
-      mockedAxios.create.mockReturnValue({
-        post: jest.fn().mockResolvedValue(mockResponse),
-        interceptors: {
-          request: { use: jest.fn() },
-          response: { use: jest.fn() }
-        }
+      // Update the service's client to use our mock
+      service['client'] = createMockAxiosClient({
+        post: jest.fn().mockResolvedValue(mockResponse)
       });
 
-      const request = {
+      const request: InferenceRequest = {
         model: 'test-model',
         messages: [{ role: 'user', content: 'Test message' }],
         temperature: 0.7
@@ -84,15 +98,13 @@ describe('OpenRouterService', () => {
 
     it('should handle errors properly', async () => {
       const mockError = new Error('API Error');
-      mockedAxios.create.mockReturnValue({
-        post: jest.fn().mockRejectedValue(mockError),
-        interceptors: {
-          request: { use: jest.fn() },
-          response: { use: jest.fn() }
-        }
+
+      // Update the service's client to use our mock
+      service['client'] = createMockAxiosClient({
+        post: jest.fn().mockRejectedValue(mockError)
       });
 
-      const request = {
+      const request: InferenceRequest = {
         model: 'test-model',
         messages: [{ role: 'user', content: 'Test message' }]
       };
@@ -120,12 +132,9 @@ describe('OpenRouterService', () => {
         }
       };
 
-      mockedAxios.create.mockReturnValue({
-        get: jest.fn().mockResolvedValue(mockResponse),
-        interceptors: {
-          request: { use: jest.fn() },
-          response: { use: jest.fn() }
-        }
+      // Update the service's client to use our mock
+      service['client'] = createMockAxiosClient({
+        get: jest.fn().mockResolvedValue(mockResponse)
       });
 
       const result = await service.getModels();
@@ -147,12 +156,9 @@ describe('OpenRouterService', () => {
 
   describe('healthCheck', () => {
     it('should return true when service is healthy', async () => {
-      mockedAxios.create.mockReturnValue({
-        get: jest.fn().mockResolvedValue({ data: {} }),
-        interceptors: {
-          request: { use: jest.fn() },
-          response: { use: jest.fn() }
-        }
+      // Update the service's client to use our mock
+      service['client'] = createMockAxiosClient({
+        get: jest.fn().mockResolvedValue({ data: {} })
       });
 
       const result = await service.healthCheck();
@@ -161,12 +167,9 @@ describe('OpenRouterService', () => {
     });
 
     it('should return false when service is unhealthy', async () => {
-      mockedAxios.create.mockReturnValue({
-        get: jest.fn().mockRejectedValue(new Error('Service unavailable')),
-        interceptors: {
-          request: { use: jest.fn() },
-          response: { use: jest.fn() }
-        }
+      // Update the service's client to use our mock
+      service['client'] = createMockAxiosClient({
+        get: jest.fn().mockRejectedValue(new Error('Service unavailable'))
       });
 
       const result = await service.healthCheck();

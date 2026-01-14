@@ -36,10 +36,10 @@ describe('Authentication Middleware', () => {
     mockReq = {
       headers: {},
       ip: '127.0.0.1',
-      get: jest.fn((header) => {
+      get: jest.fn().mockImplementation((header: string): string | string[] | undefined => {
         if (header === 'User-Agent') return 'test-agent';
         return undefined;
-      }),
+      }) as any,
     };
     mockRes = {};
     mockNext = jest.fn();
@@ -47,12 +47,14 @@ describe('Authentication Middleware', () => {
 
   describe('authenticateApiKey', () => {
     it('should allow valid API key', () => {
-      mockReq.headers['x-api-key'] = 'valid-key-123';
+      if (mockReq.headers) {
+        mockReq.headers['x-api-key'] = 'valid-key-123';
+      }
 
       authenticateApiKey(mockReq as Request, mockRes as Response, mockNext);
 
       expect(mockNext).toHaveBeenCalledWith();
-      expect((mockReq as any).apiKey).toBe('valid-key');
+      expect((mockReq as any).apiKey).toBe('valid-ke'); // First 8 chars
     });
 
     it('should reject missing API key', () => {
@@ -65,7 +67,9 @@ describe('Authentication Middleware', () => {
     });
 
     it('should reject invalid API key', () => {
-      mockReq.headers['x-api-key'] = 'invalid-key';
+      if (mockReq.headers) {
+        mockReq.headers['x-api-key'] = 'invalid-key';
+      }
 
       expect(() => {
         authenticateApiKey(mockReq as Request, mockRes as Response, mockNext);
@@ -100,9 +104,12 @@ describe('Authentication Middleware', () => {
 
     it('should reject when no API keys configured', () => {
       const { config } = require('../../../src/utils/config');
+      config.authentication.enabled = true;
       config.authentication.apiKeys = [];
 
-      mockReq.headers['x-api-key'] = 'some-key';
+      if (mockReq.headers) {
+        mockReq.headers['x-api-key'] = 'some-key';
+      }
 
       expect(() => {
         authenticateApiKey(mockReq as Request, mockRes as Response, mockNext);
@@ -122,16 +129,24 @@ describe('Authentication Middleware', () => {
     });
 
     it('should attach valid API key info', () => {
-      mockReq.headers['x-api-key'] = 'valid-key-123';
+      const { config } = require('../../../src/utils/config');
+      config.authentication.enabled = true;
+      config.authentication.apiKeys = ['valid-key-123', 'another-key-456'];
+
+      if (mockReq.headers) {
+        mockReq.headers['x-api-key'] = 'valid-key-123';
+      }
 
       optionalAuth(mockReq as Request, mockRes as Response, mockNext);
 
       expect(mockNext).toHaveBeenCalledWith();
-      expect((mockReq as any).apiKey).toBe('valid-key');
+      expect((mockReq as any).apiKey).toBe('valid-ke'); // First 8 chars
     });
 
     it('should not attach info for invalid key', () => {
-      mockReq.headers['x-api-key'] = 'invalid-key';
+      if (mockReq.headers) {
+        mockReq.headers['x-api-key'] = 'invalid-key';
+      }
 
       optionalAuth(mockReq as Request, mockRes as Response, mockNext);
 
@@ -140,7 +155,7 @@ describe('Authentication Middleware', () => {
     });
 
     it('should handle exceptions gracefully', () => {
-      // Force an exception by making req.headers throw
+      // Force an exception by making req.get throw
       mockReq.get = jest.fn(() => {
         throw new Error('Test error');
       });

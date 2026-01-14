@@ -39,10 +39,10 @@ describe('Rate Limiting Middleware', () => {
       ip: '127.0.0.1',
       path: '/api/v1/inference',
       method: 'POST',
-      get: jest.fn((header) => {
+      get: jest.fn().mockImplementation((header: string): string | string[] | undefined => {
         if (header === 'User-Agent') return 'test-agent';
         return undefined;
-      }),
+      }) as any,
     };
     mockRes = {
       status: jest.fn().mockReturnThis(),
