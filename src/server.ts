@@ -6,30 +6,10 @@
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { app, server } from './app';
-import { closeRateLimiting } from './middleware/rateLimiting';
 import { initializeOpenTelemetry } from './telemetry/opentelemetry';
 
 // Initialize OpenTelemetry before anything else
 initializeOpenTelemetry();
-
-const gracefulShutdown = async (signal: string): Promise<void> => {
-  logger.info({ signal }, 'Received shutdown signal');
-
-  // Stop accepting new connections
-  server.close(() => {
-    logger.info('HTTP server closed');
-  });
-
-  // Close Redis connection
-  try {
-    await closeRateLimiting();
-  } catch (error) {
-    logger.error({ error }, 'Error closing Redis connection');
-  }
-
-  logger.info('Graceful shutdown complete');
-  process.exit(0);
-};
 
 const startServer = async (): Promise<void> => {
   try {
@@ -58,22 +38,19 @@ const startServer = async (): Promise<void> => {
     });
 
     // Handle server errors
-    server.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
+    server.on('error', (error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'EADDRINUSE') {
         logger.error({ port }, 'Port is already in use');
         process.exit(1);
       } else {
-        logger.error({ error: error.message }, 'Server error');
+        logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Server error');
         process.exit(1);
       }
     });
 
-    // Handle graceful shutdown
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-  } catch (error: any) {
-    logger.error({ error: error.message }, 'Failed to start server');
+    // Note: Graceful shutdown handlers are registered in app.ts
+  } catch (error: unknown) {
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to start server');
     process.exit(1);
   }
 };

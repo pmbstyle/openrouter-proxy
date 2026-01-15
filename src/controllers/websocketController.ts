@@ -23,6 +23,7 @@ import {
 } from '../types/websocket';
 import { validateWebSocketMessage } from '../middleware/validation';
 import { websocketRateLimiter } from '../middleware/rateLimiting';
+import { StreamingChunk, WebSocketErrorParams } from '../types/express';
 
 export class WebSocketController {
   private connections: Map<string, WebSocketConnection> = new Map();
@@ -156,7 +157,7 @@ export class WebSocketController {
       }
 
       this.processMessage(ws, connectionId, validation.data!);
-    } catch (error: any) {
+    } catch (_error: unknown) {
       this.stats.totalErrors++;
       this.sendError(ws, connectionId, {
         code: 400,
@@ -170,7 +171,7 @@ export class WebSocketController {
     const connection = this.connections.get(connectionId);
     if (!connection) return;
 
-    const connectionLogger = createRequestLogger({ connectionId });
+    // Removed unused connectionLogger - logging happens in individual handlers
 
     switch (message.type) {
       case 'inference_request':
@@ -255,10 +256,10 @@ export class WebSocketController {
             if (line.trim() === '') continue;
 
             try {
-              const data = JSON.parse(line);
+              const data = JSON.parse(line) as StreamingChunk;
 
               // Track content for token estimation
-              if (data.choices?.[0]?.delta?.content) {
+              if (data.choices?.[0]?.delta?.content && typeof data.choices[0].delta.content === 'string') {
                 content += data.choices[0].delta.content;
               }
 
@@ -267,9 +268,13 @@ export class WebSocketController {
                 type: 'inference_response',
                 id: requestId,
                 data: {
-                  content: data.choices?.[0]?.delta?.content,
-                  finish_reason: data.choices?.[0]?.finish_reason,
-                  usage: data.usage,
+                  content: data.choices?.[0]?.delta?.content || undefined,
+                  finish_reason: data.choices?.[0]?.finish_reason || undefined,
+                  usage: data.usage ? {
+                    prompt_tokens: data.usage.prompt_tokens || 0,
+                    completion_tokens: data.usage.completion_tokens || 0,
+                    total_tokens: data.usage.total_tokens || 0,
+                  } : undefined,
                   model: data.model,
                   created: data.created,
                 },
@@ -353,9 +358,9 @@ export class WebSocketController {
     }, 30000); // 30 seconds
   }
 
-  private handleError(connectionId: string, error: Error): void {
+  private handleError(_connectionId: string, error: Error): void {
     this.stats.totalErrors++;
-    logWebSocket({ connectionId, error: error as Error }, 'WebSocket error occurred');
+    logWebSocket({ connectionId: _connectionId, error }, 'WebSocket error occurred');
   }
 
   private sendMessage(ws: WebSocket, message: WebSocketMessage): void {
@@ -364,15 +369,15 @@ export class WebSocketController {
     }
   }
 
-  private sendError(ws: WebSocket, connectionId: string, error: any): void {
+  private sendError(ws: WebSocket, connectionId: string, errorParams: WebSocketErrorParams): void {
     const errorMessage: WebSocketError = {
       type: 'error',
       id: connectionId,
       error: {
-        code: error.code || 500,
-        message: error.message || 'Unknown error',
-        type: error.type || 'internal',
-        details: error.details,
+        code: errorParams.code || 500,
+        message: errorParams.message || 'Unknown error',
+        type: (errorParams.type || 'internal') as 'openrouter' | 'validation' | 'rate_limit' | 'internal',
+        details: errorParams.details as Record<string, unknown> | undefined,
       },
     };
 

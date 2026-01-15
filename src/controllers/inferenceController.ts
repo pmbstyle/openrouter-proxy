@@ -3,7 +3,7 @@
  * Handles inference requests and responses
  */
 
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { OpenRouterService } from '../services/openrouterService';
 import { ModelRegistryService } from '../services/modelRegistryService';
@@ -12,6 +12,7 @@ import { createRequestLogger, logRequest, logResponse } from '../utils/logger';
 import { InferenceRequest, InferenceContext } from '../types/inference';
 import { calculateCost, estimatePromptTokens } from '../utils/costCalculator';
 import { asyncHandler } from '../middleware/errorHandler';
+import { AuthenticatedRequest, StreamingChunk } from '../types/express';
 
 export class InferenceController {
   constructor(
@@ -19,7 +20,7 @@ export class InferenceController {
     private modelRegistryService: ModelRegistryService
   ) {}
 
-  createCompletion = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  createCompletion = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const requestId = uuidv4();
     const startTime = Date.now();
     const context: InferenceContext = {
@@ -34,7 +35,7 @@ export class InferenceController {
     logRequest(context, 'Inference request received');
 
     // Get API key for tracking (if authenticated)
-    const apiKey = (req as any).apiKey;
+    const apiKey = req.apiKey;
 
     try {
       // Validate model
@@ -114,7 +115,7 @@ export class InferenceController {
     }
   });
 
-  createStreamingCompletion = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  createStreamingCompletion = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const requestId = uuidv4();
     const startTime = Date.now();
     const context: InferenceContext = {
@@ -129,7 +130,7 @@ export class InferenceController {
     logRequest(context, 'Streaming inference request received');
 
     // Get API key for tracking (if authenticated)
-    const apiKey = (req as any).apiKey;
+    const apiKey = req.apiKey;
 
     try {
       // Validate model
@@ -191,10 +192,10 @@ export class InferenceController {
             if (line.trim() === '') continue;
 
             try {
-              const data = JSON.parse(line);
+              const data = JSON.parse(line) as StreamingChunk;
 
               // Track content for token estimation
-              if (data.choices?.[0]?.delta?.content) {
+              if (data.choices?.[0]?.delta?.content && typeof data.choices[0].delta.content === 'string') {
                 content += data.choices[0].delta.content;
               }
 

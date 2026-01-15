@@ -9,6 +9,7 @@ import { validateModelRequest } from '../middleware/validation';
 import { asyncHandler } from '../middleware/errorHandler';
 import { logger, createRequestLogger } from '../utils/logger';
 import { openrouterService, modelRegistryService } from '../app';
+import { ModelQueryParams, ModelSearchQueryParams, TopModelsQueryParams } from '../types/express';
 
 const router = Router();
 
@@ -23,7 +24,7 @@ router.get(
   validateModelRequest,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const requestLogger = createRequestLogger({ requestId: req.headers['x-request-id'] as string });
-    const { provider, search, limit = 50, offset = 0 } = req.query as any;
+    const { provider, search, limit = 50, offset = 0 } = req.query as unknown as ModelQueryParams;
 
     requestLogger.info('Models request received', { provider, search, limit, offset });
 
@@ -193,11 +194,11 @@ router.get(
   defaultRateLimiter,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const requestLogger = createRequestLogger({ requestId: req.headers['x-request-id'] as string });
-    const { limit = 10 } = req.query as any;
+    const { limit = 10 } = req.query as unknown as TopModelsQueryParams;
 
     requestLogger.info('Top models request received', { limit });
 
-    const models = await modelRegistryService.getTopModels(parseInt(limit as string, 10));
+    const models = await modelRegistryService.getTopModels(typeof limit === 'number' ? limit : parseInt(limit, 10));
 
     requestLogger.info('Top models request completed', { 
       returned: models.length,
@@ -220,7 +221,7 @@ router.get(
   defaultRateLimiter,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const requestLogger = createRequestLogger({ requestId: req.headers['x-request-id'] as string });
-    const { q, limit = 20 } = req.query as any;
+    const { q, limit = 20 } = req.query as unknown as ModelSearchQueryParams;
 
     if (!q) {
       res.status(400).json({
@@ -238,7 +239,7 @@ router.get(
     const models = await modelRegistryService.searchModels(q as string);
 
     // Apply limit
-    const limitedModels = models.slice(0, parseInt(limit as string, 10));
+    const limitedModels = models.slice(0, typeof limit === 'number' ? limit : parseInt(limit, 10));
 
     requestLogger.info('Model search request completed', { 
       query: q,
